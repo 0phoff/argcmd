@@ -1,0 +1,45 @@
+{
+  "name": "argcmd",
+  "version": "0.0.1",
+  "description": "Advanced argument parser for your terminal applications",
+  "main": "index.js",
+  "files": [
+    "index.js",
+    "README.md"
+  ],
+  "keywords": [
+    "arguments",
+    "parser",
+    "cli",
+    "terminal",
+    "argc",
+    "argv",
+    "commander"
+  ],
+  "author": "0phoff",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git://github.com/0phoff/argcmd"
+  },
+  "scripts": {
+    "test": "xo"
+  },
+  "xo": {
+    "space": 2,
+    "rules": {
+      "eqeqeq": "warn",
+      "no-multiple-empty-lines": "off",
+      "brace-style": [
+        "error",
+        "stroustrup",
+        {
+          "allowSingleLine": true
+        }
+      ]
+    }
+  },
+  "dependencies": {
+    "chalk": "^2.3.2"
+  }
+}
