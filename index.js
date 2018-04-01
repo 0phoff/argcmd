@@ -2,32 +2,24 @@
 const path = require('path');
 const chalk = require('chalk');
 
-let options = null;
-let version = null;
-let globalDescription = null;
-const globalFlags = [];
 
-/*
- * PUBLIC
- */
-class Command {
+class SubCommand {
   constructor(name, parent) {
     this._name = name;
+    this._supercommand = parent;
     this._alias = undefined;
     this._description = undefined;
-    this._supercommand = parent;
 
     this._subcommands = [];
     this._flags = [];
-    this._privateFlags = [];
-    this._argument = null;
+    this._arguments = [];
     this._action = null;
     this._unprocessed = null;
 
-    this._help = true;
-    this._helpColor = true;
-    this._beforeHelp = null;
-    this._afterHelp = null;
+    this._help = null;
+    this._helpColor = null;
+    this._helpProlog = null;
+    this._helpEpilog = null;
   }
 
   alias(string) {
@@ -37,14 +29,6 @@ class Command {
 
   description(desc) {
     this._description = String(desc);
-    return this;
-  }
-
-  help(enabled, color, before, after) {
-    this._help = enabled === true;
-    this._helpColor = color === true;
-    this._beforeHelp = before;
-    this._afterHelp = after;
     return this;
   }
 
@@ -58,18 +42,15 @@ class Command {
   }
 
   argument(name, required) {
-    if (required) {
-      this._argument = '<' + name + '>';
-    }
-    else {
-      this._argument = '[' + name + ']';
-    }
+    name = String(name);
+    required = required === true;
 
+    this._arguments.push({name, required});
     return this;
   }
 
   command(name) {
-    const sub = new Command(name, this);
+    const sub = new SubCommand(name, this);
     sub._help = this._help;
     sub._helpColor = this._helpColor;
 
@@ -82,38 +63,40 @@ class Command {
     return this;
   }
 
-  showHelp() {
-    let color;
-    if (this._helpColor) {
-      color = new chalk.constructor();
-    }
-    else {
-      color = new chalk.constructor({enabled: false});
-    }
+  help(autoGenerate, color, prolog, epilog) {
+    this._help = autoGenerate === true;
+    this._helpColor = color === true;
+    this._helpProlog = prolog;
+    this._helpEpilog = epilog;
+    return this;
+  }
 
-    if (typeof this._beforeHelp === 'function') {
-      this._beforeHelp(options);
+  showHelp(options) {
+    const color = this._helpColor ? new chalk.constructor() : new chalk.constructor({enabled: false});
+
+    if (typeof this._helpProlog === 'function') {
+      this._helpProlog(options);
     }
     else if (this._help) {
-      console.log(color.bold.cyan(`${options.commands[0]} ${options.version}`));
-      console.log(`  ${options.globalDescription}`);
+      console.log(color.bold.cyan(`${options.commands[0]} ${options._rootCommand._version}`));
+      console.log(`  ${options._rootCommand._globalDesc}`);
       console.log();
     }
 
     if (this._help) {
       const flags = [];
       let flagLength = 0;
-      for (let i = options.globalFlags.length - 1; i >= 0; --i) {
-        let length = options.globalFlags[i].long.length;
+      for (let i = options._rootCommand._globalFlags.length - 1; i >= 0; --i) {
+        let length = options._rootCommand._globalFlags[i].long.length;
 
-        if (options.globalFlags[i].argument) {
+        if (options._rootCommand._globalFlags[i].argument) {
           length += 11;
         }
         if (length > flagLength) {
           flagLength = length;
         }
 
-        flags.push(options.globalFlags[i]);
+        flags.push(options._rootCommand._globalFlags[i]);
       }
       for (let i = this._flags.length - 1; i >= 0; --i) {
         let length = this._flags[i].long.length;
@@ -136,7 +119,15 @@ class Command {
         if (flags.length !== 0) {
           process.stdout.write('[options] ');
         }
-        if (this._argument) {
+        if (this._arguments.length > 0) {
+          this._arguments.foreach(argument => {
+            if (argument.required) {
+              process.stdout.write('<' + argument.name + '>');
+            }
+            else {
+              process.stdout.write('[' + argument.name + ']');
+            }
+          });
           process.stdout.write(this._argument);
         }
 
@@ -180,16 +171,51 @@ class Command {
       }
     }
 
-    if (typeof this._afterHelp === 'function') {
-      this._afterHelp(options);
+    if (typeof this._helpEpilog === 'function') {
+      this._helpEpilog(options);
     }
   }
 }
 
-/*
- * PRIVATE
- */
-function parse(cmd, argv) {
+class Command extends SubCommand {
+  constructor(globalDescription) {
+    super('root', null);
+    this._globalDesc = globalDescription;
+    this._version = '';
+    this._globalFlags = [
+      {short: 'h', long: 'help', argument: false, desc: 'Print this help message'}
+    ];
+
+    this._help = true;
+    this._helpColor = true;
+  }
+
+  version(string) {
+    this._version = string;
+    return this;
+  }
+
+  globalFlag(short, long, argument, desc) {
+    short = String(short);
+    long = String(long);
+    desc = String(desc);
+
+    this._globalFlags.push({short: short[0], long, argument, desc});
+    return this;
+  }
+
+  parse(argv) {
+    const options = {
+      commands: [],
+      _rootCommand: this
+    };
+
+    const remainingArgv = parseFlags(argv.slice(2), this._globalFlags, options);
+    return parse(this, [path.basename(process.argv[1]), ...remainingArgv], options);
+  }
+}
+
+function parse(cmd, argv, options) {
   let p;
 
   options.commands.push(argv[0]);
@@ -200,28 +226,28 @@ function parse(cmd, argv) {
     nextCommand = cmd._subcommands.some(sub => {
       if (cmd._unprocessed[0] === sub._name || (sub._alias && cmd._unprocessed[0] === sub._alias)) {
         cmd._unprocessed[0] = sub._name;
-        p = parse(sub, cmd._unprocessed);
+        p = parse(sub, cmd._unprocessed, options);
         return true;
       }
       return false;
     });
   }
-
-  if (!nextCommand) {
-    options.argv = parseFlags(cmd._unprocessed, cmd._flags);
-    options.commandExecuted = cmd;
+  else {
+    options.argv = parseFlags(cmd._unprocessed, cmd._flags, options);
+    options._finalCommand = cmd;
 
     if (options.help) {
-      cmd.showHelp();
-      return Promise.resolve();
+      p = cmd.showHelp(options);
     }
-    p = cmd._action(options);
+    else {
+      p = cmd._action(options);
+    }
   }
 
   return p;
 }
 
-function parseFlags(argv, flags) {
+function parseFlags(argv, flags, options) {
   flags = flags.slice();
   return argv.reduce((acc, cur, i) => {
     const test = flags.some((f, j) => {
@@ -253,38 +279,4 @@ function parseFlags(argv, flags) {
 }
 
 
-/*
- * MODULE EXPORTS
- */
-const rootCommand = new Command('root', null);
-rootCommand.start = function () {
-  options = {
-    version,
-    globalDescription,
-    globalFlags,
-    commands: []
-  };
-  options.globalFlags.push({short: 'h', long: 'help', argument: false, desc: 'Print this help message'});
-
-  const argv = parseFlags(process.argv.slice(2), options.globalFlags);
-  return parse(rootCommand, [path.basename(process.argv[1]), ...argv]);
-};
-rootCommand.version = function (v) {
-  version = String(v);
-  return this;
-};
-rootCommand.globalDescription = function (desc) {
-  globalDescription = String(desc);
-  return this;
-};
-rootCommand.globalFlag = function (short, long, argument, desc) {
-  short = String(short);
-  long = String(long);
-  desc = String(desc);
-
-  globalFlags.push({short: short[0], long, argument, desc});
-
-  return this;
-};
-
-module.exports = rootCommand;
+module.exports = Command;
