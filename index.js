@@ -41,11 +41,34 @@ class SubCommand {
     return this;
   }
 
-  argument(name, required) {
+  argument(name, nargs = 1, required = true) {
     name = String(name);
     required = required === true;
+    if (typeof nargs === 'string') {
+      switch (nargs[0]) {
+        case '?':
+          nargs = 1;
+          required = false;
+          break;
+        case '*':
+          nargs = 0;
+          required = false;
+          break;
+        case '+':
+          nargs = 0;
+          break;
+        default:
+          nargs = parseInt(nargs, 10);
+          if (isNaN(nargs)) {
+            nargs = 1;
+          }
+      }
+    }
+    else if (!(typeof nargs === 'number')) {
+      nargs = 1;
+    }
 
-    this._arguments.push({name, required});
+    this._arguments.push({name, required, nargs});
     return this;
   }
 
@@ -120,15 +143,34 @@ class SubCommand {
           process.stdout.write('[options] ');
         }
         if (this._arguments.length > 0) {
-          this._arguments.foreach(argument => {
+          this._arguments.forEach(argument => {
             if (argument.required) {
-              process.stdout.write('<' + argument.name + '>');
+              process.stdout.write('<');
             }
             else {
-              process.stdout.write('[' + argument.name + ']');
+              process.stdout.write('[');
+            }
+
+            if (argument.nargs === 0) {
+              process.stdout.write(argument.name + ' ...');
+            }
+            else if (argument.nargs === 1) {
+              process.stdout.write(argument.name);
+            }
+            else {
+              for (let i = 1; i < argument.nargs; ++i) {
+                process.stdout.write(argument.name + ' ');
+              }
+              process.stdout.write(argument.name);
+            }
+
+            if (argument.required) {
+              process.stdout.write('>');
+            }
+            else {
+              process.stdout.write(']');
             }
           });
-          process.stdout.write(this._argument);
         }
 
         console.log();
@@ -215,6 +257,7 @@ class Command extends SubCommand {
   }
 }
 
+
 function parse(cmd, argv, options) {
   let p;
 
@@ -232,14 +275,17 @@ function parse(cmd, argv, options) {
       return false;
     });
   }
-  else {
-    options.argv = parseFlags(cmd._unprocessed, cmd._flags, options);
+
+  if (!nextCommand) {
+    cmd._unprocessed = parseFlags(cmd._unprocessed, cmd._flags, options);
     options._finalCommand = cmd;
 
     if (options.help) {
       p = cmd.showHelp(options);
     }
     else {
+      cmd._unprocessed = parseArgs(cmd._unprocessed, cmd._arguments, options);
+      options.argv = cmd._unprocessed;
       p = cmd._action(options);
     }
   }
@@ -248,6 +294,10 @@ function parse(cmd, argv, options) {
 }
 
 function parseFlags(argv, flags, options) {
+  if (flags.length === 0) {
+    return argv;
+  }
+
   flags = flags.slice();
   return argv.reduce((acc, cur, i) => {
     const test = flags.some((f, j) => {
@@ -276,6 +326,48 @@ function parseFlags(argv, flags, options) {
     }
     return acc;
   }, []);
+}
+
+function parseArgs(argv, args, options) {
+  if (args.length === 0) {
+    return argv;
+  }
+
+  args.forEach(a => {
+    const property = a.name.replace(/-(.)/g, (match, letter) => letter.toUpperCase());
+    if (a.required) {
+      if (argv.length > 0 && argv.length >= a.nargs) {
+        if (a.nargs === 0) {
+          options[property] = argv;
+          argv = [];
+        }
+        else if (a.nargs === 1) {
+          options[property] = argv.shift();
+        }
+        else {
+          options[property] = argv.splice(0, a.nargs);
+        }
+      }
+      else {
+        console.error(`[${a.name}] requires ${a.nargs ? a.nargs : 'at least 1'} argument(s)`);
+        process.exit(1);
+      }
+    }
+    else if (argv.length > 0) {
+      if (a.nargs === 0) {
+        options[property] = argv;
+        argv = [];
+      }
+      else if (a.nargs === 1) {
+        options[property] = argv.shift();
+      }
+      else if (argv.length >= a.nargs) {
+        options[property] = argv.splice(0, a.nargs);
+      }
+    }
+  });
+
+  return argv;
 }
 
 

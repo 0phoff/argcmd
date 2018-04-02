@@ -30,6 +30,7 @@
     "rules": {
       "eqeqeq": "warn",
       "no-multiple-empty-lines": "off",
+      "unicorn/no-process-exit": "off",
       "brace-style": [
         "error",
         "stroustrup",
