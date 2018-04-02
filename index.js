@@ -32,18 +32,12 @@ class SubCommand {
     return this;
   }
 
-  flag(short, long, argument, desc) {
-    short = String(short);
-    long = String(long);
-    desc = String(desc);
-
-    this._flags.push({short: short[0], long, argument, desc});
+  flag(short, long, desc = '', {argument = false, typecast = id => id} = {argument: true, typecast: id => id}) {
+    this._flags.push({short: short[0], long, desc, argument, type: typecast});
     return this;
   }
 
-  argument(name, nargs = 1, required = true) {
-    name = String(name);
-    required = required === true;
+  argument(name, {nargs = 1, required = true, typecast = id => id} = {nargs: 1, required: true, typecast: id => id}) {
     if (typeof nargs === 'string') {
       switch (nargs[0]) {
         case '?':
@@ -68,7 +62,7 @@ class SubCommand {
       nargs = 1;
     }
 
-    this._arguments.push({name, required, nargs});
+    this._arguments.push({name, required, nargs, type: typecast});
     return this;
   }
 
@@ -138,7 +132,6 @@ class SubCommand {
       if (this._action) {
         process.stdout.write('  ');
         options.commands.forEach(cmd => process.stdout.write(cmd + ' '));
-
         if (flags.length !== 0) {
           process.stdout.write('[options] ');
         }
@@ -165,10 +158,10 @@ class SubCommand {
             }
 
             if (argument.required) {
-              process.stdout.write('>');
+              process.stdout.write('> ');
             }
             else {
-              process.stdout.write(']');
+              process.stdout.write('] ');
             }
           });
         }
@@ -225,7 +218,7 @@ class Command extends SubCommand {
     this._globalDesc = globalDescription;
     this._version = '';
     this._globalFlags = [
-      {short: 'h', long: 'help', argument: false, desc: 'Print this help message'}
+      {short: 'h', long: 'help', desc: 'Print this help message', argument: false, type: id => id}
     ];
 
     this._help = true;
@@ -237,12 +230,8 @@ class Command extends SubCommand {
     return this;
   }
 
-  globalFlag(short, long, argument, desc) {
-    short = String(short);
-    long = String(long);
-    desc = String(desc);
-
-    this._globalFlags.push({short: short[0], long, argument, desc});
+  globalFlag(short, long, desc, argument = false, typecast = id => id) {
+    this._globalFlags.push({short: short[0], long, desc, argument, type: typecast});
     return this;
   }
 
@@ -277,14 +266,26 @@ function parse(cmd, argv, options) {
   }
 
   if (!nextCommand) {
-    cmd._unprocessed = parseFlags(cmd._unprocessed, cmd._flags, options);
+    try {
+      cmd._unprocessed = parseFlags(cmd._unprocessed, cmd._flags, options);
+    }
+    catch (err) {
+      console.error(err.message);
+      process.exit(1);
+    }
     options._finalCommand = cmd;
 
     if (options.help) {
       p = cmd.showHelp(options);
     }
     else {
-      cmd._unprocessed = parseArgs(cmd._unprocessed, cmd._arguments, options);
+      try {
+        cmd._unprocessed = parseArgs(cmd._unprocessed, cmd._arguments, options);
+      }
+      catch (err) {
+        console.error(err.message);
+        process.exit(1);
+      }
       options.argv = cmd._unprocessed;
       p = cmd._action(options);
     }
@@ -305,14 +306,14 @@ function parseFlags(argv, flags, options) {
       if (re.test(cur)) {
         const property = f.long.replace(/-(.)/g, (match, letter) => letter.toUpperCase());
         if (f.argument && cur[1] !== '-' && cur.length > 2) {
-          options[property] = cur.substring(2);
+          options[property] = f.type(cur.substring(2));
         }
         else if (f.argument) {
-          options[property] = argv[i + 1];
+          options[property] = f.type(argv[i + 1]);
           argv.splice(i + 1, 1);
         }
         else {
-          options[property] = true;
+          options[property] = f.type(true);
         }
 
         flags.splice(j, 1);
@@ -338,31 +339,30 @@ function parseArgs(argv, args, options) {
     if (a.required) {
       if (argv.length > 0 && argv.length >= a.nargs) {
         if (a.nargs === 0) {
-          options[property] = argv;
+          options[property] = argv.map(a.type);
           argv = [];
         }
         else if (a.nargs === 1) {
-          options[property] = argv.shift();
+          options[property] = a.type(argv.shift());
         }
         else {
-          options[property] = argv.splice(0, a.nargs);
+          options[property] = argv.splice(0, a.nargs).map(a.type);
         }
       }
       else {
-        console.error(`[${a.name}] requires ${a.nargs ? a.nargs : 'at least 1'} argument(s)`);
-        process.exit(1);
+        throw new Error(`[${a.name}] requires ${a.nargs ? a.nargs : 'at least 1'} argument(s)`);
       }
     }
     else if (argv.length > 0) {
       if (a.nargs === 0) {
-        options[property] = argv;
+        options[property] = argv.map(a.type);
         argv = [];
       }
       else if (a.nargs === 1) {
-        options[property] = argv.shift();
+        options[property] = a.type(argv.shift());
       }
       else if (argv.length >= a.nargs) {
-        options[property] = argv.splice(0, a.nargs);
+        options[property] = argv.splice(0, a.nargs).map(a.type);
       }
     }
   });
